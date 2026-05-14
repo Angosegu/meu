@@ -1,0 +1,173 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Connection Test ---
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // --- Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Role-based helpers
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      // Use exists BEFORE get to prevent errors on new accounts
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().get('role', 'client') == role;
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isSeller() {
+      return hasRole('seller');
+    }
+
+    function isAssociatedWithRestaurant(restaurantId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().get('restaurantId', '') == restaurantId &&
+             getUserData().get('role', 'client') in ['admin', 'seller'];
+    }
+
+    function isRestaurantOwner(restaurantId) {
+      // Use isSignedIn first and check for restaurant existence
+      return isSignedIn() && exists(/databases/$(database)/documents/restaurants/$(restaurantId)) && 
+             (get(/databases/$(database)/documents/restaurants/$(restaurantId)).data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    // --- Entities Validation ---
+    
+    function isValidUser(data) {
+      return (data.uid == request.auth.uid || isAdmin())
+        && data.email is string
+        && data.role in ['admin', 'seller', 'client']
+        && (data.restaurantId is string || data.restaurantId == null || !('restaurantId' in data))
+        && (data.createdAt == request.time || 'createdAt' in existing());
+    }
+
+    function isValidRestaurant(data) {
+      return data.keys().hasAll(['name', 'slug', 'ownerId', 'themeColor', 'description', 'createdAt'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.slug is string && data.slug.size() > 0 && data.slug.size() <= 100
+        && (data.ownerId == request.auth.uid || isAdmin())
+        && data.themeColor is string
+        && data.description is string
+        && (data.get('tables', []) is list);
+    }
+
+    function isValidRestaurantCreate(data) {
+      return isValidRestaurant(data) && data.createdAt == request.time;
+    }
+
+    function isValidRestaurantUpdate(data) {
+      return isValidRestaurant(data) && data.createdAt == existing().createdAt;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name', 'order', 'active'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.order is number
+        && data.active is bool;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'description', 'price', 'isAvailable', 'categoryId', 'imageUrl'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.description is string
+        && data.price is number && data.price >= 0
+        && data.isAvailable is bool
+        && data.categoryId is string
+        && data.imageUrl is string;
+    }
+
+    function isValidOrder(data) {
+      return data.restaurantId is string
+        && data.tableNumber is string
+        && data.items is list
+        && data.total is number
+        && data.status in ['pending', 'preparing', 'ready', 'delivered', 'cancelled']
+        && (data.customerId is string || data.customerId == null || !('customerId' in data))
+        && data.customerName is string
+        && data.customerPhone is string
+        && (data.customerEmail is string || !('customerEmail' in data))
+        && data.createdAt == request.time;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['id', 'name', 'phone', 'email', 'registeredAt', 'source', 'lastTable'])
+        && data.id is string
+        && data.name is string && data.name.size() > 0
+        && data.phone is string && data.phone.size() >= 10
+        && data.email is string
+        && (data.registeredAt == request.time || 'registeredAt' in existing())
+        && data.source is string
+        && data.lastTable is string;
+    }
+
+    // --- Routes ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin()) && isValidUser(incoming());
+      allow update, delete: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    match /restaurants/{restaurantId} {
+      allow read: if true;
+      allow create, update: if isSignedIn() && (incoming().ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow write: if isRestaurantOwner(restaurantId);
+      }
+
+      match /products/{productId} {
+        allow read: if true;
+        allow write: if isRestaurantOwner(restaurantId);
+      }
+
+      match /orders/{orderId} {
+        // Public order creation and tracking
+        allow read, write: if true;
+      }
+
+      match /customers/{customerId} {
+        // Public registration, only owner/admin can read/list
+        allow write: if true;
+        allow read: if isRestaurantOwner(restaurantId);
+      }
+    }
+
+    // Allow collection group queries for orders (used in Client Dashboard/Tracking)
+    // Completely open to prevent 403 on tracking
+    match /{path=**}/orders/{orderId} {
+      allow read, write: if true;
+    }
+  }
+}

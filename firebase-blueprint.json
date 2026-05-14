@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "Restaurant": {
+      "title": "Restaurant",
+      "description": "A restaurant using the digital menu system.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Display name of the restaurant." },
+        "slug": { "type": "string", "description": "Unique URL-friendly identifier." },
+        "description": { "type": "string", "description": "Short description or tagline." },
+        "logoUrl": { "type": "string", "description": "URL to the restaurant logo." },
+        "themeColor": { "type": "string", "description": "Theme color for the client UI." },
+        "ownerId": { "type": "string", "description": "Firebase Auth UID of the owner." }
+      },
+      "required": ["name", "slug", "ownerId"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Menu categories (e.g., Starters, Drinks).",
+      "type": "object",
+      "properties": {
+        "restaurantId": { "type": "string", "description": "ID of the parent restaurant." },
+        "name": { "type": "string", "description": "Category name." },
+        "order": { "type": "number", "description": "Display order." }
+      },
+      "required": ["restaurantId", "name", "order"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Individual menu items.",
+      "type": "object",
+      "properties": {
+        "restaurantId": { "type": "string", "description": "ID of the parent restaurant." },
+        "categoryId": { "type": "string", "description": "ID of the category." },
+        "name": { "type": "string", "description": "Product name." },
+        "description": { "type": "string", "description": "Product description." },
+        "price": { "type": "number", "description": "Price in decimal format." },
+        "imageUrl": { "type": "string", "description": "URL to product image." },
+        "isAvailable": { "type": "boolean", "description": "Whether the item is currently available." }
+      },
+      "required": ["restaurantId", "categoryId", "name", "price", "isAvailable"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer orders.",
+      "type": "object",
+      "properties": {
+        "restaurantId": { "type": "string", "description": "ID of the restaurant." },
+        "tableNumber": { "type": "string", "description": "Number of the table." },
+        "items": {
+          "type": "array",
+          "description": "List of items ordered.",
+          "items": { "type": "object" }
+        },
+        "total": { "type": "number", "description": "Total order price." },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "preparing", "ready", "delivered", "cancelled"],
+          "description": "Current status of the order."
+        },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the order was placed." }
+      },
+      "required": ["restaurantId", "tableNumber", "items", "total", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "restaurants": {
+      "schema": "Restaurant",
+      "description": "List of restaurants."
+    },
+    "restaurants/{restaurantId}/categories": {
+      "schema": "Category",
+      "description": "Categories for a specific restaurant."
+    },
+    "restaurants/{restaurantId}/products": {
+      "schema": "Product",
+      "description": "Products for a specific restaurant."
+    },
+    "restaurants/{restaurantId}/orders": {
+      "schema": "Order",
+      "description": "Orders for a specific restaurant."
+    }
+  }
+}
